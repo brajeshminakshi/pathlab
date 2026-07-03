@@ -1,0 +1,96 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOrgMember(orgId) {
+      return isSignedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.organizationId == orgId;
+    }
+
+    function hasRole(orgId, ...roles) {
+      return isOrgMember(orgId) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in roles;
+    }
+
+    function isSuperAdmin() {
+      return isSignedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'super_admin';
+    }
+
+    function canEditOrg(orgId) {
+      return hasRole(orgId, 'super_admin', 'lab_admin');
+    }
+
+    // Users collection
+    match /users/{userId} {
+      allow read: if isSignedIn() && (request.auth.uid == userId || isSuperAdmin());
+      allow create: if isSignedIn() && request.auth.uid == userId;
+      allow update: if isSignedIn() && (request.auth.uid == userId || isSuperAdmin());
+      allow delete: if isSuperAdmin();
+    }
+
+    // Organizations collection
+    match /organizations/{orgId} {
+      allow read: if isOrgMember(orgId);
+      allow create: if isSignedIn();
+      allow update: if canEditOrg(orgId);
+      allow delete: if isSuperAdmin();
+    }
+
+    // Patients collection - org-level access
+    match /organizations/{orgId}/patients/{patientId} {
+      allow read: if isOrgMember(orgId) && hasRole(orgId, 'lab_admin', 'doctor', 'pathologist', 'receptionist', 'technician');
+      allow create: if isOrgMember(orgId) && hasRole(orgId, 'lab_admin', 'receptionist');
+      allow update: if isOrgMember(orgId) && hasRole(orgId, 'lab_admin', 'receptionist');
+      allow delete: if isOrgMember(orgId) && hasRole(orgId, 'lab_admin');
+    }
+
+    // Tests collection - org-level master data
+    match /organizations/{orgId}/tests/{testId} {
+      allow read: if isOrgMember(orgId);
+      allow create: if isOrgMember(orgId) && hasRole(orgId, 'lab_admin');
+      allow update: if isOrgMember(orgId) && hasRole(orgId, 'lab_admin');
+      allow delete: if isOrgMember(orgId) && hasRole(orgId, 'lab_admin');
+    }
+
+    // Reports collection - org-level
+    match /organizations/{orgId}/reports/{reportId} {
+      allow read: if isOrgMember(orgId) && hasRole(orgId, 'lab_admin', 'doctor', 'pathologist', 'receptionist', 'technician');
+      allow create: if isOrgMember(orgId) && hasRole(orgId, 'lab_admin', 'technician');
+      allow update: if isOrgMember(orgId) && hasRole(orgId, 'lab_admin', 'pathologist');
+      allow delete: if isOrgMember(orgId) && hasRole(orgId, 'lab_admin');
+    }
+
+    // Invoices collection - org-level
+    match /organizations/{orgId}/invoices/{invoiceId} {
+      allow read: if isOrgMember(orgId) && hasRole(orgId, 'lab_admin', 'receptionist', 'doctor');
+      allow create: if isOrgMember(orgId) && hasRole(orgId, 'lab_admin', 'receptionist');
+      allow update: if isOrgMember(orgId) && hasRole(orgId, 'lab_admin', 'receptionist');
+      allow delete: if isOrgMember(orgId) && hasRole(orgId, 'lab_admin');
+    }
+
+    // Inventory collection - org-level
+    match /organizations/{orgId}/inventory/{itemId} {
+      allow read: if isOrgMember(orgId);
+      allow create: if isOrgMember(orgId) && hasRole(orgId, 'lab_admin', 'technician');
+      allow update: if isOrgMember(orgId) && hasRole(orgId, 'lab_admin', 'technician');
+      allow delete: if isOrgMember(orgId) && hasRole(orgId, 'lab_admin');
+    }
+
+    // Settings collection - org-level
+    match /organizations/{orgId}/settings/{settingId} {
+      allow read: if isOrgMember(orgId);
+      allow create: if isOrgMember(orgId) && hasRole(orgId, 'lab_admin');
+      allow update: if isOrgMember(orgId) && hasRole(orgId, 'lab_admin');
+      allow delete: if isOrgMember(orgId) && hasRole(orgId, 'lab_admin');
+    }
+
+    // Audit Logs collection - org-level (read-only for non-admins)
+    match /organizations/{orgId}/auditLogs/{logId} {
+      allow read: if isOrgMember(orgId) && hasRole(orgId, 'lab_admin', 'super_admin');
+      allow create: if isOrgMember(orgId);
+      allow update, delete: if isSuperAdmin();
+    }
+  }
+}
